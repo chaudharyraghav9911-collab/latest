@@ -1,0 +1,94 @@
+name: Daily News Brief PDF
+
+on:
+  schedule:
+    # Runs every day at 01:30 UTC = 07:00 IST
+    - cron: "30 1 * * *"
+  workflow_dispatch:   # Allow manual trigger from GitHub UI
+
+permissions:
+  contents: write      # Needed to commit the PDF back to the repo (optional)
+
+jobs:
+  generate-pdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Generate Daily News PDF
+        id: generate
+        run: |
+          mkdir -p output
+          export OUTPUT_DIR=output
+          python src/daily_news_pdf.py
+          echo "pdf_path=$(ls output/Daily_News_Brief_*.pdf | head -1)" >> $GITHUB_OUTPUT
+
+      - name: Upload PDF as Artifact (keeps 30 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-news-brief
+          path: output/Daily_News_Brief_*.pdf
+          retention-days: 30
+
+      # Optional: Commit the latest PDF into the repo (so you can browse history)
+      - name: Commit latest PDF to repo
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p latest
+          cp output/Daily_News_Brief_*.pdf latest/Daily_News_Brief_Latest.pdf
+          git add latest/Daily_News_Brief_Latest.pdf
+          git commit -m "chore: daily news brief $(date +%Y-%m-%d)" || echo "No changes to commit"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ========== OPTIONAL DELIVERY METHODS ==========
+      # Uncomment and configure the ones you want.
+
+      # --- Option A: Send via Email (SMTP) ---
+      # - name: Send PDF via Email
+      #   if: success()
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: smtp.gmail.com
+      #     server_port: 465
+      #     username: ${{ secrets.EMAIL_USERNAME }}
+      #     password: ${{ secrets.EMAIL_PASSWORD }}
+      #     subject: Daily News Brief - ${{ github.run_id }}
+      #     to: your-email@example.com
+      #     from: Daily News Bot
+      #     body: Your daily 3-page news brief is attached.
+      #     attachments: ${{ steps.generate.outputs.pdf_path }}
+
+      # --- Option B: Upload to Google Drive ---
+      # (Requires google-drive-upload action + service account)
+      # - name: Upload to Google Drive
+      #   uses: adityak74/google-drive-upload@master
+      #   with:
+      #     path: ${{ steps.generate.outputs.pdf_path }}
+      #     credentials: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}
+      #     folderId: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+
+      # --- Option C: Send to Telegram ---
+      # - name: Send to Telegram
+      #   if: success()
+      #   run: |
+      #     curl -F document=@"${{ steps.generate.outputs.pdf_path }}" \
+      #          -F caption="Daily News Brief is ready 🔥" \
+      #          https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
